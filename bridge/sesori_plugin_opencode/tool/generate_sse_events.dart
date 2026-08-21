@@ -34,6 +34,7 @@ const Map<String, String> _v1Imports = {
   'SnapshotFileDiff': 'openapi/snapshot_file_diff.g.dart',
   'SessionStatus': 'openapi/session_status.g.dart',
   'QuestionInfo': 'openapi/question_info.g.dart',
+  'QuestionTool': 'openapi/question_tool.g.dart',
 };
 
 void main() {
@@ -287,7 +288,7 @@ String _dartType(Map<String, dynamic> f, {required bool required}) {
   final isList = f['list'] == true;
   if (ref != null) {
     if (isList) return 'List<$ref>';
-    return ref;
+    return required ? ref : '$ref?';
   }
   final t = f['type'] as String;
   final base = switch (t) {
@@ -310,7 +311,9 @@ String _encodeField(String name, Map<String, dynamic> f) {
     return '$name.map((e) => e.toJson()).toList()';
   }
   if (ref != null) {
-    return '$name.toJson()';
+    // An optional ref encodes as null-absent (the repo's `?expr` JSON
+    // omission convention), matching the generated openapi models.
+    return f['required'] == false ? '?$name?.toJson()' : '$name.toJson()';
   }
   return name;
 }
@@ -323,6 +326,9 @@ String _decodeField(String name, Map<String, dynamic> f, bool required) {
     return '(json[$jsonName] as List<dynamic>).map((e) => $ref.fromJson(e as Map<String, dynamic>)).toList()';
   }
   if (ref != null) {
+    if (!required) {
+      return 'json[$jsonName] == null ? null : $ref.fromJson(json[$jsonName] as Map<String, dynamic>)';
+    }
     return '$ref.fromJson(json[$jsonName] as Map<String, dynamic>)';
   }
   final t = f['type'] as String;

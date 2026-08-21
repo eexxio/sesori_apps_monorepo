@@ -22,7 +22,14 @@ class const SseParseResult({
   final String? directory,
     /// The original raw data string - always preserved for forwarding.
   required final String rawData,
-  });
+  }) {
+  /// Whether the frame announces a pending permission/question ask — the event
+  /// kinds whose loss leaves a running task stuck awaiting input. True even
+  /// when the payload failed to decode (the type is still known), so callers
+  /// can recover by re-querying the pending lists instead of staying blind
+  /// until a manual refresh.
+  bool get isPendingInputAsk => _pendingInputAskEventTypes.contains(eventType);
+}
 
 /// Parses raw OpenCode SSE event strings into typed [SseEventData] objects.
 ///
@@ -131,6 +138,9 @@ class SseEventParser() {
     return SseEventData.fromJson({"type": type, ...properties});
   }
 }
+
+/// The ask event types whose loss strands a running task awaiting input.
+const Set<String> _pendingInputAskEventTypes = {"permission.asked", "question.asked"};
 
 const Set<String> _knownEventTypes = {
   "server.connected",

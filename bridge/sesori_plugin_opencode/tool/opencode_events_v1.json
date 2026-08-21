@@ -167,10 +167,12 @@
     },
     {
       "type": "question.asked",
+      "_comment": "Matches the OpenCode EventQuestionAsked payload. `tool` is the optional {messageID, callID} object upstream attaches when a tool call (e.g. bash) raises the ask — present on v1.17.7+ runtimes, so it must be declared or a tool-driven question decodes against an incomplete shape.",
       "fields": [
         { "name": "id", "type": "string" },
         { "name": "sessionID", "type": "string" },
-        { "name": "questions", "ref": "QuestionInfo", "list": true }
+        { "name": "questions", "ref": "QuestionInfo", "list": true },
+        { "name": "tool", "ref": "QuestionTool", "required": false }
       ]
     },
     {

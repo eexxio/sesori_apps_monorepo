@@ -1020,6 +1020,161 @@ void main() {
       expect(events, isEmpty);
     });
 
+    test("tool-driven question.asked forwards a bridge question event and flips awaiting input", () async {
+      final plugin = OpenCodePlugin(serverUrl: server.baseUrl);
+      addTearDown(plugin.dispose);
+      await server.waitForSseConnection();
+
+      final initialProjectUpdated = Completer<void>();
+      // The plugin emits the tracker-driven projects summary in the same batch
+      // as the ask (summary first, ask second), so the test counts summaries
+      // and requires one more than the cold-start baseline once the ask lands.
+      var summaryCount = 0;
+      final questionAsked = Completer<BridgeSseQuestionAsked>();
+      final subscription = plugin.events.listen((event) {
+        if (event is BridgeSseProjectUpdated) {
+          if (!initialProjectUpdated.isCompleted) {
+            initialProjectUpdated.complete();
+          } else {
+            summaryCount++;
+          }
+        }
+        if (event is BridgeSseQuestionAsked && !questionAsked.isCompleted) {
+          questionAsked.complete(event);
+        }
+      });
+      addTearDown(subscription.cancel);
+
+      await initialProjectUpdated.future;
+
+      // Mirrors OpenCode v1.17.7+ wire shape: a tool call (e.g. bash) raising
+      // the ask carries the optional `tool` object next to `questions`.
+      await server.emitRawSse(
+        jsonEncode({
+          "directory": "/repo",
+          "payload": {
+            "type": "question.asked",
+            "properties": {
+              "id": "que_1",
+              "sessionID": "s-root",
+              "questions": [
+                {
+                  "question": "Allow running this command?",
+                  "header": "Permission",
+                  "options": [
+                    {"label": "Yes", "description": "Run it"},
+                    {"label": "No", "description": "Skip"},
+                  ],
+                  "multiple": false,
+                },
+              ],
+              "tool": {"messageID": "msg-1", "callID": "call-1"},
+            },
+          },
+        }),
+      );
+
+      final event = await questionAsked.future.timeout(const Duration(seconds: 1));
+      expect(event.id, equals("que_1"));
+      expect(event.sessionID, equals("s-root"));
+      expect(event.displaySessionId, equals("s-root"));
+      expect(event.questions.single.question, equals("Allow running this command?"));
+      expect(event.questions.single.options.map((o) => o.label), equals(["Yes", "No"]));
+
+      // The awaiting-input change re-emits the summary alongside the ask, so
+      // the phone's session list flips to awaiting-input without a manual
+      // refresh gesture.
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(summaryCount, greaterThanOrEqualTo(1));
+    });
+
+    test("permission.asked with upstream extra fields forwards a bridge permission event", () async {
+      final plugin = OpenCodePlugin(serverUrl: server.baseUrl);
+      addTearDown(plugin.dispose);
+      await server.waitForSseConnection();
+
+      final initialProjectUpdated = Completer<void>();
+      final permissionAsked = Completer<BridgeSsePermissionAsked>();
+      final subscription = plugin.events.listen((event) {
+        if (event is BridgeSseProjectUpdated && !initialProjectUpdated.isCompleted) {
+          initialProjectUpdated.complete();
+        }
+        if (event is BridgeSsePermissionAsked && !permissionAsked.isCompleted) {
+          permissionAsked.complete(event);
+        }
+      });
+      addTearDown(subscription.cancel);
+
+      await initialProjectUpdated.future;
+
+      // Carries every upstream v1.18.x field: the declared four plus the
+      // undeclared-on-the-wire-required `metadata`, `always`, and object
+      // `tool` — none of which may break decoding.
+      await server.emitRawSse(
+        jsonEncode({
+          "directory": "/repo",
+          "payload": {
+            "type": "permission.asked",
+            "properties": {
+              "id": "per_1",
+              "sessionID": "s-root",
+              "permission": "bash",
+              "patterns": ["ls -la"],
+              "metadata": {"command": "ls -la"},
+              "always": ["ls *"],
+              "tool": {"messageID": "msg-2", "callID": "call-2"},
+            },
+          },
+        }),
+      );
+
+      final event = await permissionAsked.future.timeout(const Duration(seconds: 1));
+      expect(event.requestID, equals("per_1"));
+      expect(event.sessionID, equals("s-root"));
+      expect(event.displaySessionId, equals("s-root"));
+      expect(event.tool, equals("bash"));
+      expect(event.description, equals("ls -la"));
+      expect(event.allowAlways, isTrue);
+    });
+
+    test("a malformed question.asked payload still triggers a summary re-emit for pending-list recovery", () async {
+      final plugin = OpenCodePlugin(serverUrl: server.baseUrl);
+      addTearDown(plugin.dispose);
+      await server.waitForSseConnection();
+
+      final initialProjectUpdated = Completer<void>();
+      var summaryCountAfterDropRequested = 0;
+      final recoverySummary = Completer<void>();
+      final subscription = plugin.events.listen((event) {
+        if (event is BridgeSseProjectUpdated) {
+          if (!initialProjectUpdated.isCompleted) {
+            initialProjectUpdated.complete();
+            return;
+          }
+          summaryCountAfterDropRequested++;
+          if (summaryCountAfterDropRequested > 0 && !recoverySummary.isCompleted) {
+            recoverySummary.complete();
+          }
+        }
+      });
+      addTearDown(subscription.cancel);
+
+      await initialProjectUpdated.future;
+
+      // A known ask whose payload fails to decode must not leave surfaces
+      // blind: the drop path re-emits the projects summary so clients
+      // immediately re-query GET /question instead of waiting for a manual
+      // refresh to reveal the stuck prompt.
+      await server.emitRawSse(
+        jsonEncode({
+          "directory": "/repo",
+          "payload": {"type": "question.asked"},
+        }),
+      );
+
+      await recoverySummary.future.timeout(const Duration(seconds: 1));
+    });
+
     test("drop log formatting includes event type when present", () {
       expect(
         formatDroppedSseFrameLog(

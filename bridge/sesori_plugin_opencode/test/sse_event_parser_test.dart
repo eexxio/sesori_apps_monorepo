@@ -105,6 +105,103 @@ void main() {
       expect(result.rawData, equals(rawData));
     });
 
+    test("parses question.asked with the optional tool object", () {
+      final parser = SseEventParser();
+      final rawData = jsonEncode({
+        "directory": "/repo",
+        "payload": {
+          "type": "question.asked",
+          "properties": {
+            "id": "que_1",
+            "sessionID": "s1",
+            "questions": [
+              {
+                "question": "Allow running this command?",
+                "header": "Permission",
+                "options": [
+                  {"label": "Yes", "description": "Run it"},
+                ],
+              },
+            ],
+            "tool": {"messageID": "msg-1", "callID": "call-1"},
+          },
+        },
+      });
+
+      final result = parser.parse(rawData);
+
+      expect(result.outcome, equals(SseParseOutcome.validKnownEvent));
+      expect(result.isPendingInputAsk, isTrue);
+      final event = result.event! as SseQuestionAsked;
+      expect(event.id, equals("que_1"));
+      expect(event.sessionID, equals("s1"));
+      final tool = event.tool;
+      if (tool == null) {
+        fail("question.asked with a tool object must decode the tool field");
+      }
+      expect(tool.messageID, equals("msg-1"));
+      expect(tool.callID, equals("call-1"));
+    });
+
+    test("parses a tool-less question.asked", () {
+      final parser = SseEventParser();
+      final rawData = jsonEncode({
+        "payload": {
+          "type": "question.asked",
+          "properties": {
+            "id": "que_2",
+            "sessionID": "s1",
+            "questions": <Map<String, dynamic>>[],
+          },
+        },
+      });
+
+      final result = parser.parse(rawData);
+
+      expect(result.outcome, equals(SseParseOutcome.validKnownEvent));
+      expect(result.isPendingInputAsk, isTrue);
+      final event = result.event! as SseQuestionAsked;
+      expect(event.tool, isNull);
+    });
+
+    test("parses permission.asked carrying upstream metadata, always, and object tool fields", () {
+      final parser = SseEventParser();
+      final rawData = jsonEncode({
+        "payload": {
+          "type": "permission.asked",
+          "properties": {
+            "id": "per_1",
+            "sessionID": "s1",
+            "permission": "bash",
+            "patterns": ["ls -la"],
+            "metadata": {"command": "ls -la"},
+            "always": ["ls *"],
+            "tool": {"messageID": "msg-2", "callID": "call-2"},
+          },
+        },
+      });
+
+      final result = parser.parse(rawData);
+
+      expect(result.outcome, equals(SseParseOutcome.validKnownEvent));
+      expect(result.isPendingInputAsk, isTrue);
+      final event = result.event! as SsePermissionAsked;
+      expect(event.permission, equals("bash"));
+      expect(event.patterns, equals(["ls -la"]));
+    });
+
+    test("a malformed ask frame is still flagged as pending input", () {
+      final parser = SseEventParser();
+
+      final result = parser.parse(
+        jsonEncode({"payload": {"type": "question.asked"}}),
+      );
+
+      expect(result.outcome, equals(SseParseOutcome.malformedKnownPayload));
+      expect(result.isPendingInputAsk, isTrue);
+      expect(result.rawData, isNotEmpty);
+    });
+
     test("parses 1.4 session.diff payload with patch-based diff array", () {
       final parser = SseEventParser();
       final rawData = jsonEncode({

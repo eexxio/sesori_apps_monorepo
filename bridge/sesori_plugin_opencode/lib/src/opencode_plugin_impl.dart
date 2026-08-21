@@ -706,6 +706,23 @@ class OpenCodePlugin._({
     );
   }
 
+  /// Logs the dropped frame and, for question/permission asks whose payload
+  /// failed to decode, re-emits the activity summary so connected surfaces
+  /// immediately re-query the pending lists. A silently dropped ask would
+  /// otherwise leave a running task stuck "in progress" with no surfaced
+  /// prompt until a manual refresh — issue #879.
+  void _handleDroppedKnownPayload(SseParseResult parseResult) {
+    _logDroppedSseFrame(
+      category: "malformed-known-payload",
+      message: "Ignoring malformed payload for known SSE event.",
+      directory: parseResult.directory,
+      eventType: parseResult.eventType,
+    );
+    if (parseResult.isPendingInputAsk) {
+      _emitProjectsSummary();
+    }
+  }
+
   void _handleRawSseEvent(String rawData) {
     try {
       final parseResult = _parser.parse(rawData);
@@ -752,12 +769,7 @@ class OpenCodePlugin._({
           );
           return;
         case SseParseOutcome.malformedKnownPayload:
-          _logDroppedSseFrame(
-            category: "malformed-known-payload",
-            message: "Ignoring malformed payload for known SSE event.",
-            directory: parseResult.directory,
-            eventType: parseResult.eventType,
-          );
+          _handleDroppedKnownPayload(parseResult);
           return;
       }
     } catch (e, st) {

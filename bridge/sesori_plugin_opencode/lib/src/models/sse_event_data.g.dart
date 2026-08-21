@@ -7,6 +7,7 @@
 import "openapi/message.g.dart";
 import "openapi/part.g.dart";
 import "openapi/question_info.g.dart";
+import "openapi/question_tool.g.dart";
 import "openapi/session.g.dart";
 import "openapi/session_status.g.dart";
 import "openapi/snapshot_file_diff.g.dart";
@@ -119,6 +120,7 @@ sealed class SseEventData {
     required String id,
     required String sessionID,
     required List<QuestionInfo> questions,
+    QuestionTool? tool,
   }) = SseQuestionAsked;
   const factory SseEventData.questionReplied({
     required String requestID,
@@ -818,11 +820,13 @@ class SseQuestionAsked extends SseEventData implements SseSessionEventData {
     required this.id,
     required this.sessionID,
     required this.questions,
+    this.tool,
   });
 
   final String id;
   final String sessionID;
   final List<QuestionInfo> questions;
+  final QuestionTool? tool;
 
   @override
   String get type => "question.asked";
@@ -833,6 +837,7 @@ class SseQuestionAsked extends SseEventData implements SseSessionEventData {
     "id": id,
     "sessionID": sessionID,
     "questions": questions.map((e) => e.toJson()).toList(),
+    "tool": ?tool?.toJson(),
   };
 
   factory SseQuestionAsked.fromJson(Map<String, dynamic> json) {
@@ -840,6 +845,7 @@ class SseQuestionAsked extends SseEventData implements SseSessionEventData {
       id: json["id"] as String,
       sessionID: json["sessionID"] as String,
       questions: (json["questions"] as List<dynamic>).map((e) => QuestionInfo.fromJson(e as Map<String, dynamic>)).toList(),
+      tool: json["tool"] == null ? null : QuestionTool.fromJson(json["tool"] as Map<String, dynamic>),
     );
   }
 }
